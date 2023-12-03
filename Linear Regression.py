@@ -1,85 +1,135 @@
-import statsmodels.api as sm
-import statsmodels.formula.api as smf
 import numpy as np
-import pandas as pd
-from statsmodels.stats.outliers_influence import variance_inflation_factor
+import matplotlib.pyplot as plt
 
+def MSE(y_pred, y):
+    """
+    Parameters
+    ----------
+    y_pred : ndarray, shape (n_samples,)
+    y : ndarray, shape (n_samples,)
 
-def get_vif(exogs, data):
+    Returns
+    ----------
+    mse : numpy.float
+    """
+    mse = np.mean((y-y_pred)**2)
 
-    vif_dict, tolerance_dict = {}, {}
+    return mse
 
-    for exog in exogs:
-        not_exog = [i for i in exogs if i != exog]
-        formula = f"{exog} ~ {' + '.join(not_exog)}"
-        #print(formula)
-        # extract r-squared from the fit
-        r_squared = smf.ols(formula, data=data).fit().rsquared
+class ScratchLinearRegression():
+    """
+    Parameters
+    ----------
+    num_iter : int
+    lr : float
+    no_bias : bool
+    verbose : bool
 
-        # calculate VIF
-        vif = 1 / (1 - r_squared)
-        vif_dict[exog] = vif
+    Attributes
+    ----------
+    self.coef_ : ndarray, shape (n_features,)
+    self.loss : ndarray, shape (self.iter,)
+    self.val_loss : ndarray, shape (self.iter,)
+    """
 
-        # calculate tolerance
-        tolerance = 1 - r_squared
-        tolerance_dict[exog] = tolerance
+    def __init__(self, num_iter, lr, no_bias, verbose):
+        self.iter = num_iter
+        self.lr = lr
+        self.no_bias = no_bias
+        self.verbose = verbose
+        self.loss = np.zeros(self.iter)
+        self.val_loss = np.zeros(self.iter)
 
-        # return VIF DataFrame
-    df_vif = pd.DataFrame({'VIF': vif_dict, 'Tolerance': tolerance_dict})
+    def fit(self, X, y, X_val=None, y_val=None):
+        """
+        Parameters
+        ----------
+        X : ndarray, shape (n_samples, n_features)
+        y : ndarray, shape (n_samples, )
 
-    return df_vif
+        X_val : ndarray, shape (n_samples, n_features)
+        y_val : ndarray, shape (n_samples, )
+        """
+        if self.no_bias == False:
+            X = np.concatenate([X, np.ones((X.shape[0], 1))], axis=1)
+            if X_val is not None:
+                X_val = np.concatenate([X_val, np.ones((X_val.shape[0], 1))], axis=1)
 
-#estimate linear regression
-class linear_regression():
+        self.coef_ = np.random.random((X.shape[1], ))
 
-    def __init__(self, training, dep_var):
+        for epoch in range(self.iter):
+            y_pred = self._linear_hypothesis(X)
+            self.loss[epoch] = np.mean((y-y_pred)**2)
+            self._gradient_descent(X, self.loss[epoch])
 
-        self.training = training
-        self.variable = list(training)
+            ### validation ###
+            if X_val is not None:
+                y_pred_val = self._linear_hypothesis(X_val)
+                self.val_loss[epoch] = np.mean((y_val - y_pred_val) ** 2)
 
-        self.dep_var = dep_var
+            if self.verbose:
+                if X_val is not None:
+                    print(f"Epoch-{epoch}: train loss={self.loss[epoch]}, "
+                          f"val loss={self.val_loss[epoch]}")
+                else:
+                    print(f"Epoch-{epoch}: train loss={self.loss[epoch]}")
 
-    def regression(self):
+        return self.coef_, self.loss, self.val_loss
 
-        # perform unbiased estimation
-        self.variable.remove(self.dep_var)
+    def predict(self, X):
+        """
+        Parameters
+        ----------
+        X : ndarray, shape (n_samples, n_features)
+        Returns
+        -------
+            ndarray, shape (n_samples, 1)
+        """
+        y_pred = self._linear_hypothesis(X)
 
-        df_vif = get_vif(self.variable, self.training)
-        
-        while np.max(df_vif["VIF"]) >= 10 or len(np.isinf(df_vif["VIF"])[np.isinf(df_vif["VIF"]) == True])>0:
-            for var, vf in zip(df_vif.index.values, df_vif["VIF"]):
-                if vf==np.max(df_vif["VIF"]):
-                    self.variable.remove(var)
-        
-            df_vif = get_vif(self.variable, self.training)
+        return y_pred
 
+    def _linear_hypothesis(self, X):
+        """
+        Parameters
+        ----------
+        X : ndarray, shape (n_samples, n_features)
+        Returns
+        -------
+          ndarray, shape (n_samples, 1)
+        """
 
-        linear_model = sm.OLS(self.training[self.dep_var], self.training[self.variable])
-        final_model = linear_model.fit()
+        y_pred =  np.dot(X, self.coef_)
 
+        return y_pred
 
-        while len(np.isnan(final_model.pvalues)[np.isnan(final_model.pvalues) == True]) > 0:
-        
-            for i in final_model.pvalues.index.get_values():
-                if np.isnan(final_model.pvalues[i]):
-        
-                    self.variable.remove(i)
-        
-                    trainX = self.trainingX[self.variable]
-                    linear_model = sm.OLS(self.trainingY, trainX)
-                    final_model = linear_model.fit()
-        
-        
-            if np.max(final_model.pvalues) > 0.1:
-                rem_var = final_model.pvalues[final_model.pvalues ==
-                                              np.max(final_model.pvalues)].index.get_values()
-        
-                self.variable.remove(rem_var)
-        
-                trainX = self.trainingX[self.variable]
-                linear_model = sm.OLS(self.trainingY, trainX)
-                final_model = linear_model.fit()
+    def _gradient_descent(self, X, error):
 
+        gradient = np.mean(X.T * error, axis=1)
+        self.coef_ = self.coef_ - self.lr * gradient
 
-        return final_model, self.variable
+        pass
 
+### test ####
+X = np.random.random((100, 3))
+Y = np.random.random((100, ))
+
+X_val = np.random.random((100, 3))
+Y_val = np.random.random((100, ))
+
+n_iter = 5
+lr = 1#0.001
+bias = True
+verbose=True
+
+linear_model = ScratchLinearRegression(num_iter=n_iter,
+                                       lr=lr,
+                                       no_bias=bias,
+                                       verbose=True)
+
+model, train_loss, val_loss = linear_model.fit(X, Y, X_val, Y_val)
+
+plt.plot(train_loss, label='train_loss')
+plt.plot(val_loss, label='val_loss')
+plt.legend()
+plt.show()
